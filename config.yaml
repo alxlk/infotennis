@@ -22,7 +22,8 @@ atp:
   stroke-analysis:
     https://itp-atp-sls.infosys-platforms.com/static/prod/stroke-analysis/v2/%(year)s/%(tourn_id)s/%(match_id)s/data.json
   court-vision:
-    https://itp-atp-sls.infosys-platforms.com/static/prod/court-vision/%(year)s/%(tourn_id)s/%(match_id)s/data.json
+    #https://itp-atp-sls.infosys-platforms.com/static/prod/court-vision/%(year)s/%(tourn_id)s/%(match_id)s/data.json
+    https://itp-atp-sls.infosys-platforms.com/static/prod/court-vision/%(year)s/%(tourn_id)s/%(match_id)s/winners.json
 
 aus-open: 
   results:
