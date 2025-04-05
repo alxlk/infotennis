@@ -195,11 +195,24 @@ def scrape_ATP_match_data(year: int, tourn_id: str, match_id: str, data_type: st
     except:
         raise ValueError("Invalid data_type argument provided.")
     
-    # Get request and content from the given link and parse into HTML
-    pageTree = requests.get(link, headers=headers)
-    pageSoup = BeautifulSoup(pageTree.content, 'html.parser') 
+    ## Get request and content from the given link and parse into HTML
+    #pageTree = requests.get(link, headers=headers)
+    #pageSoup = BeautifulSoup(pageTree.content, 'html.parser') 
     
-    results_json = json.loads(str(pageSoup))
+    #results_json = json.loads(str(pageSoup))
+
+    with urllib.request.urlopen(link, timeout=10) as response:
+        # Read the response data (returns bytes)
+        response_bytes = response.read()
+
+        # Decode the bytes into a string (usually UTF-8, but check headers if unsure)
+        # Get encoding from headers or default to utf-8
+        charset = response.info().get_content_charset() or 'utf-8'
+        response_string = response_bytes.decode(charset)
+
+        # Parse the JSON string into a Python object
+        data = json.loads(response_string)
+        
 
     # Decode Data
     raw_data = decode_py(results_json)
