@@ -24,15 +24,19 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from bs4 import BeautifulSoup
-import cryptography.hazmat.backends
-import cryptography.hazmat.primitives.ciphers
-import cryptography.hazmat.primitives.ciphers.algorithms
-import cryptography.hazmat.primitives.ciphers.modes
-import cryptography.hazmat.primitives.padding
+#import cryptography.hazmat.backends
+#import cryptography.hazmat.primitives.ciphers
+#import cryptography.hazmat.primitives.ciphers.algorithms
+#import cryptography.hazmat.primitives.ciphers.modes
+#import cryptography.hazmat.primitives.padding
 import numpy as np
 import pandas as pd
 import requests
 import yaml
+import math
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+
 
 headers = {'User-Agent': 
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.106 Safari/537.36'} 
@@ -50,45 +54,111 @@ with open(config_path, "r") as yamlfile:
 
 ##############################################
 # Decrypting Utilities
-def formatDate(t):
-    """
-    Returns a formatted form of the 'lastModified' key from the encrypted data object.
-    """
-    #e = datetime.datetime.now().utcoffset().total_seconds() / 60       # ChatGPT suggestion but not needed
-    #t = t + datetime.timedelta(minutes=e)                              # ChatGPT suggestion but not needed
-    
-    t_tstamp = datetime.datetime.utcfromtimestamp(t/1000)
-    n = t_tstamp.day
-    r = int(str(n if n >= 10 else "0" + str(n))[::-1])
-    i = t_tstamp.year
-    a = int(str(i)[::-1])
-    o = np.base_repr(int(str(t), base=16), 36).lower() + np.base_repr((i + a) * (n + r), 24).lower()
+# Helper function to convert an integer to a string in a given base (up to 36)
+def int_to_base(n, base):
+    if n == 0:
+        return '0'
+    if base < 2 or base > 36:
+        raise ValueError("Base must be between 2 and 36")
+
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    res = ""
+    while n > 0:
+        res = digits[n % base] + res
+        n //= base
+    return res
+
+# Translate the formatDate JavaScript function
+def format_date_py(timestamp_ms):
+    # Convert milliseconds timestamp to a datetime object (uses local timezone)
+    # Note: This is the trickiest part to match JS exactly due to getTimezoneOffset
+    # The JS logic adjusts the time *before* extracting the date based on local offset.
+    # Python's fromtimestamp uses local time directly. Let's try to mimic the JS:
+
+    # 1. Create initial datetime object to find offset *for that time*
+    #    Use UTC first to avoid local DST issues during initial conversion
+    dt_utc = datetime.datetime.fromtimestamp(timestamp_ms / 1000.0, datetime.timezone.utc)
+    #    Convert to local time to get the offset JavaScript likely used
+    dt_local_for_offset = dt_utc.astimezone()
+    #    Get offset in seconds, convert to minutes (JS returns minutes)
+    #    JS offset is positive if local time is *behind* UTC. timedelta.total_seconds() is negative if behind.
+    offset_minutes = -int(dt_local_for_offset.utcoffset().total_seconds() / 60)
+
+    # 2. Apply the JS offset logic to the original timestamp
+    adjusted_timestamp_ms = timestamp_ms + 60 * offset_minutes * 1000
+    # 3. Create the final datetime object from the adjusted timestamp (again, interpreting as local)
+    dt = datetime.datetime.fromtimestamp(adjusted_timestamp_ms / 1000.0)
+
+    # Extract date parts from the *adjusted* datetime
+    day = dt.day
+    year = dt.year
+
+    # Format day and reverse digits
+    day_str = f"{day:02d}" # Pad with leading zero if needed
+    day_reversed_int = int(day_str[::-1]) # Reverse string and convert to int
+
+    # Reverse year digits
+    year_str = str(year)
+    year_reversed_int = int(year_str[::-1]) # Reverse string and convert to int
+
+    # Calculate 'o' string part by part (matching the JS logic carefully)
+    # Part 1: Strange hex parsing followed by base 36 conversion
+    # Note: int(str(timestamp_ms), 16) interprets the decimal string as hex
+    part1_num = int(str(timestamp_ms), 16)
+    part1_str = int_to_base(part1_num, 36)
+
+    # Part 2: Calculation followed by base 24 conversion
+    part2_num = (year + year_reversed_int) * (day + day_reversed_int)
+    part2_str = int_to_base(part2_num, 24)
+
+    o = part1_str + part2_str
+
+    # Pad or truncate 'o' to length 14
     s = len(o)
     if s < 14:
         o += "0" * (14 - s)
     elif s > 14:
         o = o[:14]
+
+    # Add prefix and suffix
     return "#" + o + "$"
 
-def decode(data):
-    """
-    Decrypting algorithm for encrypted ATP match statistics data.
+# Translate the decode JavaScript function
+def decode_py(data_dict):
+    timestamp_ms = data_dict["lastModified"]
+    encrypted_b64 = data_dict["response"]
 
-    Credit: Github/Stackoverflow user Gabjauf
-    """
-    e = formatDate(data['lastModified'])
-    n = e.encode()
-    r = e.upper().encode()
-    cipher = cryptography.hazmat.primitives.ciphers.Cipher(
-        cryptography.hazmat.primitives.ciphers.algorithms.AES(n),
-        cryptography.hazmat.primitives.ciphers.modes.CBC(r),
-        backend=cryptography.hazmat.backends.default_backend()
-    )
-    decryptor = cipher.decryptor()
-    i = decryptor.update(base64.b64decode(data['response'])) + decryptor.finalize()
-    unpadder = cryptography.hazmat.primitives.padding.PKCS7(128).unpadder()
-    #return json.loads(unpadder.update(i) + unpadder.finalize().decode('utf-8'))
-    return json.loads(i.decode("utf-8").replace(i.decode("utf-8")[-1],""))
+    # Generate the key/IV base string
+    key_iv_base = format_date_py(timestamp_ms)
+
+    # Derive key and IV
+    key = key_iv_base.encode('utf-8')
+    iv = key_iv_base.upper().encode('utf-8')
+
+    # Decode the Base64 encoded ciphertext
+    ciphertext = base64.b64decode(encrypted_b64)
+
+    # Create AES cipher instance
+    # Mode: CBC, Padding: PKCS7 (implicitly handled by pycryptodome's unpad)
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+
+    # Decrypt and unpad
+    try:
+        decrypted_padded = cipher.decrypt(ciphertext)
+        # Use PKCS7 style unpadding
+        decrypted = unpad(decrypted_padded, AES.block_size, style='pkcs7')
+        # Decode from UTF-8 bytes to string
+        decrypted_str = decrypted.decode('utf-8')
+        # Parse the JSON string
+        return json.loads(decrypted_str)
+    except (ValueError, KeyError) as e:
+        print(f"Error during decryption or unpadding: {e}")
+        print("This might indicate an incorrect key/IV (check format_date_py logic and timezone assumptions) or corrupted data.")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error parsing decrypted JSON: {e}")
+        print(f"Decrypted string was: {decrypted.decode('utf-8', errors='ignore')}") # Print potentially non-JSON string
+        return None
 
 
 ##############################################
@@ -132,7 +202,7 @@ def scrape_ATP_match_data(year: int, tourn_id: str, match_id: str, data_type: st
     results_json = json.loads(str(pageSoup))
 
     # Decode Data
-    raw_data = decode(results_json)
+    raw_data = decode_py(results_json)
 
     return raw_data
 
