@@ -24,7 +24,7 @@ atp:
   court-vision:
     https://itp-atp-sls.infosys-platforms.com/static/prod/court-vision/%(year)s/%(tourn_id)s/%(match_id)s/data.json
   court-vision-3d:
-    https://itp-atp-sls.infosys-platforms.com/static/prod/court-vision-3d/%(year)s/%(tourn_id)s/%(match_id)s/winners.json
+    https://itp-atp-sls.infosys-platforms.com/static/prod/court-vision-3d/%(year)s/%(tourn_id)s/%(match_id)s/Winner.json
 
 aus-open: 
   results:
